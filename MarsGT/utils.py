@@ -8,9 +8,13 @@ from tqdm import tqdm
 import math
 import scanpy as sc
 from sklearn.metrics import accuracy_score
+import pandas as pd
 from sklearn.metrics.cluster import normalized_mutual_info_score
 
+
+#
 def subgraph(graph, seed, n_neighbors, node_sele_prob):
+    # cumprod是计算累积乘积
     total_matrix_size = 1 + np.cumprod(n_neighbors).sum()  # Number of nodes in the subgraph
     picked_nodes = {seed}  # One node in the batch
     last_layer_nodes = {seed}
@@ -19,10 +23,12 @@ def subgraph(graph, seed, n_neighbors, node_sele_prob):
     to_pick = 1
     for n_neighbors_current in n_neighbors:  # Current layer neighbors
         to_pick = to_pick * n_neighbors_current
+        # 寻找节点的邻居，所谓的节点的邻居就是矩阵中不为0的点,此时找的节点邻居是细胞混合基因之间关系。
         neighbors = graph[list(last_layer_nodes), :].nonzero()[1]  # Find neighbors of last_layer_nodes
 
         neighbors_prob = node_sele_prob[list(neighbors)]
         neighbors = list(set(neighbors))  # Make all nodes from the last layer part of the neighbors set
+        # to_pick是设置的邻居节点数，len(neighbors)是实际的邻居节点数，取两者的最小值
         n_neigbors_real = min(
             to_pick,
             len(neighbors))  # Handle the case where the required number of neighbors is less than the actual number of neighbors
@@ -35,13 +41,14 @@ def subgraph(graph, seed, n_neighbors, node_sele_prob):
     indices = list(sorted(picked_nodes - {seed}))
     return indices
 
-
+# neighbor=[20]是每个细胞的邻居数量
 def batch_select_whole(RNA_matrix, ATAC_matrix, neighbor=[20], cell_size=30):
     print('We are currently in the process of partitioning the data into batches. Kindly wait for a moment, please.')
+    # 生成随机样本，
     node_ids = np.random.choice(RNA_matrix.shape[1], size=RNA_matrix.shape[1], replace=False)
+    # 对细胞进行划分batch，其中cell_size为每个batch的细胞数
     n_batch = math.ceil(node_ids.shape[0] / cell_size)
     indices_ss = []
-
     RNA_matrix1 = RNA_matrix
     dic = {}
     for i in tqdm(range(n_batch)):
@@ -51,10 +58,15 @@ def batch_select_whole(RNA_matrix, ATAC_matrix, neighbor=[20], cell_size=30):
             for index, node in enumerate(node_ids[i * cell_size:(i + 1) * cell_size]):
                 rna_ = RNA_matrix1[:, node].todense()
                 rna_[rna_ < 5] = 0
+                # transpose是转置操作，
+                # squeeze函数的作用是压缩矩阵，去掉维度为1的维度
+                # subgraph的作用是返回与node作为邻居的peak/gene索引。
+                # np.squeeze(np.array(np.log(rna_ + 1)))作为每一个基因被选择到的概率
                 gene_indices = subgraph(RNA_matrix.transpose(), node, neighbor, np.squeeze(np.array(np.log(rna_ + 1))))
                 peak_indices = subgraph(ATAC_matrix.transpose(), node, neighbor,
                                         np.squeeze(np.array(np.log(ATAC_matrix[:, node].todense() + 1))))
                 dic[node] = {'g': gene_indices, 'p': peak_indices}
+                # gene_indices_all 存储的是batch1中所有细胞节点的gene邻居，同样，peak_indices_all存储的是batch1中所有细胞节点的peak邻居
                 gene_indices_all = gene_indices_all + gene_indices
                 peak_indices_all = peak_indices_all + peak_indices
             node_indices_all = node_ids[i * cell_size:(i + 1) * cell_size]
@@ -99,7 +111,7 @@ class LabelSmoothing(nn.Module):
 
     def forward(self, x, target):
         logprobs = torch.nn.functional.log_softmax(x, dim=-1)
-        nll_loss = -logprobs.gather(dim=-1, index=target.unsqueeze(1))
+        nll_loss = -logprobs.gather(dim=1, index=target)
         nll_loss = nll_loss.squeeze(1)
         smooth_loss = -logprobs.mean(dim=-1)
         loss = self.confidence * nll_loss + self.smoothing * smooth_loss
@@ -119,7 +131,7 @@ def initial_clustering(RNA_matrix, custom_n_neighbors=None, n_pcs=40, custom_res
             return 0.5, 10
         else:
             return 0.8, 15
-
+    # transpose进行矩阵转置
     adata = ad.AnnData(RNA_matrix.transpose(), dtype='int32')
 
     # If the user did not provide a custom resolution or n_neighbors value, use the values calculated by segment_function
@@ -128,8 +140,9 @@ def initial_clustering(RNA_matrix, custom_n_neighbors=None, n_pcs=40, custom_res
     else:
         resolution = custom_resolution
         n_neighbors = custom_n_neighbors
-
+    # 归一化
     sc.pp.normalize_total(adata, target_sum=1e4)
+    # 对低表达基因基因进行平滑处理，使其更加符合正态分布。提高训练的稳定性和效果
     sc.pp.log1p(adata)
 
     # Use the user-provided embedding if available, otherwise use n_pcs
@@ -137,8 +150,9 @@ def initial_clustering(RNA_matrix, custom_n_neighbors=None, n_pcs=40, custom_res
         adata.obsm['use_rep']=use_rep
         sc.pp.neighbors(adata, use_rep='use_rep', n_neighbors=n_neighbors)
     else:
+        # 用以计算单细胞数据中细胞之间的邻居关系
         sc.pp.neighbors(adata, n_neighbors=n_neighbors, n_pcs=n_pcs)
-
+    # 执行leiden聚类算法
     sc.tl.leiden(adata, resolution)
     return adata.obs['leiden']
 
@@ -199,3 +213,17 @@ def Entropy(pred_label, true_label):
                 en += np.log(p) * p
         e = e + en * pred_k / true_label.shape[0]
     return abs(e)
+
+#TODO:获取peak和gene关系的index
+#TODO:解决问题：重复索引的生成问题
+def get_index(gene_sub,index,index_com):
+    ind = []
+    gene_sub = gene_sub.todense()
+    gene_sub = pd.DataFrame(gene_sub)
+    gene_sub['index'] = list(index)
+    gene_sub['isin'] = gene_sub['index'].isin(index_com)
+    for i in index_com:
+        tmp = gene_sub[gene_sub['index'] == i].index.tolist()
+        ind= ind + tmp
+    # g = gene_sub[gene_sub['isin']]
+    return ind
