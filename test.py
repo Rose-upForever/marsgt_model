@@ -90,14 +90,14 @@ if __name__ == "__main__":
     args = parser.parse_args([])
 
     # os.chdir('Tutorial_example') # Please replace the actual path with the path to "Tutorial_example" file.
-    gene_peak = sparse.load_npz('D:\生信\代码及数据文件\marsgt\dataset\Gene_Peak_.npz')
-    peak_cell = sparse.load_npz('D:\生信\代码及数据文件\marsgt\dataset\ATAC.npz')
-    gene_cell = sparse.load_npz('D:\生信\代码及数据文件\marsgt\dataset\RNA.npz')
-    true_label = np.load('D:\生信\代码及数据文件\marsgt\dataset\label500.npy', allow_pickle=True)
-    gene_names = pd.DataFrame(np.load('D:\生信\代码及数据文件\marsgt\dataset\gene_name.npy', allow_pickle=True))
-    peak_names = pd.DataFrame(np.load('D:\生信\代码及数据文件\marsgt\dataset\peak_name.npy', allow_pickle=True))
+    gene_peak = sparse.load_npz('dataset/Gene_Peak_.npz')
+    peak_cell = sparse.load_npz('dataset/ATAC.npz')
+    gene_cell = sparse.load_npz('dataset/RNA.npz')
+    true_label = np.load('dataset/label500.npy', allow_pickle=True)
+    gene_names = pd.DataFrame(np.load('dataset/gene_name.npy', allow_pickle=True))
+    peak_names = pd.DataFrame(np.load('dataset/peak_name.npy', allow_pickle=True))
     # 生成的
-    index = pd.read_csv('D:\生信\代码及数据文件\marsgt\dataset\index.txt')
+    index = pd.read_csv('dataset/index.txt')
 
     peak_cell.obs_names = peak_names[0]
     gene_cell.obs_names = gene_names[0]
